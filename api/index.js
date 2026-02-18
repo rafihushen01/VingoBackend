@@ -1,5 +1,5 @@
 /* =========================================================
-   🚀 VINGO ULTRA PRODUCTION SERVER (RAILWAY + REALTIME)
+   🚀 VINGO GOD-TIER PRODUCTION SERVER (RAILWAY REALTIME CORE)
    ========================================================= */
 
 const express = require("express")
@@ -13,9 +13,15 @@ const { Server } = require("socket.io")
 
 dotenv.config()
 
-/* ===================== EXPRESS APP ===================== */
+/* ===================== HARD ENV CHECK ===================== */
+if (!process.env.MONGO_URL) {
+  console.error("❌ FATAL: MONGO_URL missing in Railway ENV")
+  process.exit(1)
+}
+
+/* ===================== EXPRESS ===================== */
 const app = express()
-app.set("trust proxy", 1) // Railway / Cloud safe
+app.set("trust proxy", 1)
 
 /* ===================== HTTP SERVER ===================== */
 const server = http.createServer(app)
@@ -26,7 +32,7 @@ const shoprouter = require("../src/route/ShopRoute.js")
 const itemrouter = require("../src/route/ItemRoute.js")
 const orderrouter = require("../src/route/OrderRoute.js")
 
-/* ===================== SOCKET.IO ===================== */
+/* ===================== SOCKET.IO (ULTRA REALTIME) ===================== */
 const io = new Server(server, {
   cors: {
     origin: [
@@ -36,22 +42,19 @@ const io = new Server(server, {
     ],
     credentials: true
   },
-  pingTimeout: 20000,
-  pingInterval: 25000,
-  transports: ["websocket", "polling"]
+  transports: ["websocket", "polling"],
+  pingTimeout: 25000,
+  pingInterval: 20000,
+  upgradeTimeout: 30000,
+  allowEIO3: true
 })
 
-/* ===================== SOCKET HANDLER ===================== */
+/* ===================== SOCKET ENGINE ===================== */
 io.on("connection", (socket) => {
   console.log("🟢 Socket Connected:", socket.id)
 
-  socket.on("join_room", (roomid) => {
-    socket.join(roomid)
-  })
-
-  socket.on("leave_room", (roomid) => {
-    socket.leave(roomid)
-  })
+  socket.on("join_room", (roomid) => socket.join(roomid))
+  socket.on("leave_room", (roomid) => socket.leave(roomid))
 
   socket.on("new_order", (data) => {
     io.to(data.shopid).emit("order_received", data)
@@ -61,17 +64,17 @@ io.on("connection", (socket) => {
     io.to(data.userid).emit("order_status_changed", data)
   })
 
-  socket.on("disconnect", () => {
-    console.log("🔴 Socket Disconnected:", socket.id)
+  socket.on("disconnect", (reason) => {
+    console.log("🔴 Socket Disconnected:", reason)
   })
 })
 
 /* ===================== GLOBAL PERFORMANCE ===================== */
 app.use(compression())
-app.use(express.json({ limit: "15mb" }))
+app.use(express.json({ limit: "20mb" }))
 app.use(cookieParser())
 
-/* ===================== CORS (RAILWAY SAFE) ===================== */
+/* ===================== CORS SAFE ===================== */
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.SECOND_FRONTEND_URL,
@@ -79,15 +82,15 @@ const allowedOrigins = [
 ]
 
 app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true)
-    return callback(null, false)
+  origin: (origin, cb) => {
+    if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
+    return cb(null, false)
   },
   credentials: true,
   methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"]
 }))
 
-/* ===================== NO CACHE (LIVE APIs) ===================== */
+/* ===================== NO CACHE ===================== */
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-store")
   res.setHeader("Pragma", "no-cache")
@@ -95,49 +98,69 @@ app.use((req, res, next) => {
   next()
 })
 
-/* ===================== REQUEST TIMEOUT ===================== */
+/* ===================== REQUEST TIMEOUT GUARD ===================== */
 app.use((req, res, next) => {
-  const timeout = setTimeout(() => {
+  const timer = setTimeout(() => {
     if (!res.headersSent) {
       res.status(408).json({ message: "Request Timeout" })
     }
-  }, 12000)
+  }, 15000)
 
-  res.on("finish", () => clearTimeout(timeout))
+  res.on("finish", () => clearTimeout(timer))
   next()
 })
 
-/* ===================== MONGODB (RAILWAY OPTIMIZED) ===================== */
-let isConnected = false
+/* ===================== MONGODB GOD CONNECTION ===================== */
+let cached = global.mongoose
 
-async function connectDBOnce() {
-  if (isConnected) return
-  try {
-    await mongoose.connect(process.env.MONGO_URL, {
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null }
+}
+
+async function connectDB() {
+  if (cached.conn) return cached.conn
+
+  if (!cached.promise) {
+    cached.promise = mongoose.connect(process.env.MONGO_URL, {
       maxPoolSize: 50,
       minPoolSize: 5,
       serverSelectionTimeoutMS: 8000,
       socketTimeoutMS: 60000,
-      family: 4
+      family: 4,
+      autoIndex: false
+    }).then((mongoose) => {
+      console.log("✅ MongoDB Connected")
+      return mongoose
+    }).catch((err) => {
+      console.error("❌ MongoDB Crash:", err.message)
+      process.exit(1)
     })
-    isConnected = true
-    console.log("✅ MongoDB Connected")
-  } catch (err) {
-    console.error("❌ MongoDB Failed:", err.message)
-    process.exit(1)
   }
+
+  cached.conn = await cached.promise
+  return cached.conn
 }
 
-connectDBOnce()
+/* ===================== DB AUTO RECOVERY ===================== */
+mongoose.connection.on("disconnected", () => {
+  console.log("⚠️ MongoDB Disconnected — Reconnecting...")
+})
+
+mongoose.connection.on("reconnected", () => {
+  console.log("♻️ MongoDB Reconnected")
+})
+
+mongoose.connection.on("error", (err) => {
+  console.error("🔥 MongoDB Error:", err.message)
+})
 
 /* ===================== HEALTH CHECK ===================== */
-app.get("/", (req, res) => {
-  res.status(200).send("🚀 VINGO Backend Running")
-})
+app.get("/", (req, res) => res.send("🚀 VINGO Backend Running"))
 
 app.get("/health", (req, res) => {
   res.json({
     status: "OK",
+    db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     time: new Date()
@@ -150,9 +173,9 @@ app.use("/shop", shoprouter)
 app.use("/item", itemrouter)
 app.use("/order", orderrouter)
 
-/* ===================== GLOBAL ERROR HANDLER ===================== */
+/* ===================== GLOBAL ERROR SHIELD ===================== */
 app.use((err, req, res, next) => {
-  console.error("🔥 Server Error:", err)
+  console.error("🔥 Server Error:", err.stack || err)
   if (!res.headersSent) {
     res.status(500).json({ message: "Internal Server Error" })
   }
@@ -162,9 +185,11 @@ app.use((err, req, res, next) => {
 server.keepAliveTimeout = 65000
 server.headersTimeout = 66000
 
-/* ===================== START SERVER ===================== */
+/* ===================== START SERVER AFTER DB ===================== */
 const PORT = process.env.PORT || 8080
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Server running on ${PORT}`)
+connectDB().then(() => {
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 VINGO ULTRA SERVER RUNNING ON ${PORT}`)
+  })
 })
