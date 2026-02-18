@@ -171,7 +171,7 @@ server.keepAliveTimeout = 70000
 server.headersTimeout = 71000
 
 /* ===================== START SERVER (RAILWAY READY) ===================== */
-const PORT = process.env.PORT
+const PORT = process.env.PORT || 8080
 if (!PORT) {
   console.error("❌ FATAL: PORT missing from Railway ENV")
   process.exit(1)
