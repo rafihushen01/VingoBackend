@@ -1,5 +1,5 @@
 /* =========================================================
-   🚀 VINGO GOD MODE SERVER (RAILWAY + REALTIME + HTTPS)
+   🚀 VINGO GOD-MODE ULTRA SERVER (RAILWAY + REALTIME + HTTPS)
    ========================================================= */
 
 const express = require("express")
@@ -9,10 +9,13 @@ const http = require("http")
 const compression = require("compression")
 const mongoose = require("mongoose")
 const { Server } = require("socket.io")
-
+const helmet = require("helmet") // Security headers
+const morgan = require("morgan") // Logger
+const dotenv=require("dotenv")
+dotenv.config()
 /* ===================== ENV VALIDATION ===================== */
-const requiredEnvs = ["MONGO_URL", "FRONTEND_URL"]
-requiredEnvs.forEach((key) => {
+const REQUIRED_ENVS = ["MONGO_URL","PORT", "FRONTEND_URL"]
+REQUIRED_ENVS.forEach((key) => {
   if (!process.env[key]) {
     console.error(`❌ FATAL: ${key} missing in Railway ENV`)
     process.exit(1)
@@ -23,13 +26,16 @@ requiredEnvs.forEach((key) => {
 const app = express()
 app.set("trust proxy", 1) // Cloud safe
 
-/* ===================== GLOBAL PERFORMANCE ===================== */
+/* ===================== GLOBAL MIDDLEWARE ===================== */
+app.use(helmet())
 app.use(compression())
 app.use(express.json({ limit: "25mb" }))
+app.use(express.urlencoded({ extended: true, limit: "25mb" }))
 app.use(cookieParser())
+app.use(morgan("tiny")) // Logs requests
 
 /* ===================== CORS (RAILWAY SAFE) ===================== */
-const allowedOrigins = [
+const ALLOWED_ORIGINS = [
   process.env.FRONTEND_URL,
   process.env.SECOND_FRONTEND_URL,
   process.env.THIRD_FRONTEND_URL
@@ -38,7 +44,7 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: (origin, cb) => {
-      if (!origin || allowedOrigins.includes(origin)) return cb(null, true)
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true)
       return cb(new Error("CORS BLOCKED"))
     },
     credentials: true,
@@ -54,7 +60,19 @@ app.use((req, res, next) => {
   next()
 })
 
-/* ===================== DB CONNECTION (RAILWAY + GOD MODE) ===================== */
+/* ===================== REQUEST TIMEOUT GUARD ===================== */
+app.use((req, res, next) => {
+  const timer = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(408).json({ message: "Request Timeout" })
+    }
+  }, 20000) // 20s timeout
+
+  res.on("finish", () => clearTimeout(timer))
+  next()
+})
+
+/* ===================== MONGODB GOD CONNECTION ===================== */
 let cached = global.mongoose
 if (!cached) cached = global.mongoose = { conn: null, promise: null }
 
@@ -64,7 +82,7 @@ async function connectDB() {
   if (!cached.promise) {
     cached.promise = mongoose
       .connect(process.env.MONGO_URL, {
-        maxPoolSize: 50,
+        maxPoolSize: 100,
         minPoolSize: 5,
         serverSelectionTimeoutMS: 10000,
         socketTimeoutMS: 120000,
@@ -96,7 +114,7 @@ mongoose.connection.on("error", (err) =>
   console.error("🔥 MongoDB Error:", err.message)
 )
 
-/* ===================== ROUTES ===================== */
+/* ===================== ROUTES (TRILLION-DOLLAR) ===================== */
 const userrouter = require("../src/route/AuthRoute.js")
 const shoprouter = require("../src/route/ShopRoute.js")
 const itemrouter = require("../src/route/ItemRoute.js")
@@ -110,14 +128,11 @@ app.use("/order", orderrouter)
 /* ===================== SOCKET.IO (ULTRA REALTIME) ===================== */
 const server = http.createServer(app)
 const io = new Server(server, {
-  cors: {
-    origin: allowedOrigins,
-    credentials: true
-  },
+  cors: { origin: ALLOWED_ORIGINS, credentials: true },
   transports: ["websocket", "polling"],
-  pingTimeout: 30000,
+  pingTimeout: 35000,
   pingInterval: 25000,
-  upgradeTimeout: 40000,
+  upgradeTimeout: 45000,
   allowEIO3: true
 })
 
@@ -126,12 +141,10 @@ io.on("connection", (socket) => {
 
   socket.on("join_room", (roomid) => socket.join(roomid))
   socket.on("leave_room", (roomid) => socket.leave(roomid))
-
   socket.on("new_order", (data) => io.to(data.shopid).emit("order_received", data))
   socket.on("order_status_update", (data) =>
     io.to(data.userid).emit("order_status_changed", data)
   )
-
   socket.on("disconnect", (reason) => console.log("🔴 Socket Disconnected:", reason))
 })
 
@@ -154,8 +167,8 @@ app.use((err, req, res, next) => {
 })
 
 /* ===================== KEEP-ALIVE ===================== */
-server.keepAliveTimeout = 65000
-server.headersTimeout = 66000
+server.keepAliveTimeout = 70000
+server.headersTimeout = 71000
 
 /* ===================== START SERVER (RAILWAY READY) ===================== */
 const PORT = process.env.PORT
@@ -166,6 +179,6 @@ if (!PORT) {
 
 connectDB().then(() => {
   server.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 VINGO ULTRA SERVER RUNNING ON PORT ${PORT}`)
+    console.log(`🚀 VINGO GOD-MODE SERVER RUNNING ON PORT ${PORT}`)
   })
 })
