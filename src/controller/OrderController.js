@@ -100,11 +100,26 @@ const getuserorders = async (req, res) => {
       .populate("shopOrder.shopOrderItems.item", "name price quantity image")
       .lean(); // 🚀 faster json-ready objects
 
-    // ❌ step 3: handle no order case
+    // Return an empty state instead of 404 for dashboard-friendly polling.
     if (!orders || orders.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "no orders found for this user ❗",
+      return res.status(200).json({
+        success: true,
+        message: "No orders found for this user",
+        metadata: {
+          totalorders: 0,
+          totalamount: 0,
+          lastorderid: null,
+          lastorderdate: null,
+          delmobileincluded: true,
+          status: "empty",
+        },
+        timestamp: new Date(),
+        orders: [],
+        ui: {
+          theme: "glass-neon-hypergradient",
+          animation: "fadein-glow",
+          responsequality: "100trilliondollar-level",
+        },
       });
     }
 
@@ -180,9 +195,16 @@ const getownerorders = async (req, res) => {
       );
 
     if (!orders || orders.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No orders found for this Owner",
+      return res.status(200).json({
+        success: true,
+        message: "No orders found for this owner",
+        metadata: {
+          totalorders: 0,
+          totalamount: 0,
+          lastorderid: null,
+          lastorderdate: null,
+        },
+        orders: [],
       });
     }
 

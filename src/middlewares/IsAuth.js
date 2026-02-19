@@ -29,6 +29,12 @@ const getTokenFromRequest = (req) => {
   return null;
 };
 
+const decodeToken = (token) => {
+  const decodedtoken = jwt.verify(token, secretkey);
+  if (!decodedtoken?.id) return null;
+  return decodedtoken;
+};
+
 const isAuth = async (req, res, next) => {
   try {
     const token = getTokenFromRequest(req);
@@ -37,7 +43,7 @@ const isAuth = async (req, res, next) => {
       return res.status(401).json({ message: "Unauthorized access, token missing" });
     }
 
-    const decodedtoken = jwt.verify(token, secretkey);
+    const decodedtoken = decodeToken(token);
     if (!decodedtoken?.id) {
       return res.status(401).json({ message: "Unauthorized access, token invalid" });
     }
@@ -49,4 +55,24 @@ const isAuth = async (req, res, next) => {
   }
 };
 
+const optionalAuth = async (req, res, next) => {
+  try {
+    const token = getTokenFromRequest(req);
+    if (!token) {
+      return next();
+    }
+
+    const decodedtoken = decodeToken(token);
+    if (decodedtoken?.id) {
+      req.userId = decodedtoken.id;
+    }
+
+    return next();
+  } catch (error) {
+    void error;
+    return next();
+  }
+};
+
 module.exports = isAuth;
+module.exports.optionalAuth = optionalAuth;

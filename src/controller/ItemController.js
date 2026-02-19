@@ -21,7 +21,10 @@ const addItem = async (req, res) => {
     // Find existing shop
     const existingShop = await Shop.findOne({ owner: req.userId });
     if (!existingShop) {
-      return res.status(404).json({ success: false, message: "Shop not found" });
+      return res.status(400).json({
+        success: false,
+        message: "Create your shop first before adding items",
+      });
     }
 
     // Create new item
@@ -157,7 +160,7 @@ const getitembycity = async (req, res) => {
     });
 
     if (!shops.length) {
-      return res.status(404).json({ success: false, message: "No shops found in this city" });
+      return res.status(200).json({ success: true, items: [] });
     }
 
     const shopIds = shops.map(shop => shop._id);
@@ -247,9 +250,11 @@ const searchitems = async (req, res) => {
     }).populate("items");
 
     if (!shops || shops.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No shops found in this city 🏙️"
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        items: [],
+        message: "No shops found in this city",
       });
     }
 
@@ -274,9 +279,11 @@ const searchitems = async (req, res) => {
     }).populate("shop", "name image address state city");
 
     if (!items || items.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No items matched your search 🔎"
+      return res.status(200).json({
+        success: true,
+        count: 0,
+        items: [],
+        message: "No items matched your search",
       });
     }
 

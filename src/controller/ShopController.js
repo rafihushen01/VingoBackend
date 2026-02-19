@@ -77,14 +77,17 @@ const getMyShop = async (req, res) => {
       .populate("owner");
 
     if (!shopData) {
-      return res.status(404).json({
-        success: false,
+      return res.status(200).json({
+        success: true,
+        hasShop: false,
         message: "No shop found for this user",
+        shop: null,
       });
     }
 
     return res.status(200).json({
       success: true,
+      hasShop: true,
       shop: shopData,
     });
 
