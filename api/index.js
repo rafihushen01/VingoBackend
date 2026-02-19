@@ -40,20 +40,45 @@ const RAW_ORIGINS = [
   "http://127.0.0.1:5174",
 ];
 
+const sanitizeOrigin = (origin) => {
+  const stripped = String(origin || "")
+    .trim()
+    .replace(/^['"]|['"]$/g, "");
+
+  if (!stripped) return "";
+
+  try {
+    const url = new URL(stripped);
+    const isDefaultPort =
+      (url.protocol === "https:" && url.port === "443") ||
+      (url.protocol === "http:" && url.port === "80");
+    const portPart = url.port && !isDefaultPort ? `:${url.port}` : "";
+    return `${url.protocol}//${url.hostname}${portPart}`;
+  } catch (error) {
+    void error;
+    return stripped.replace(/\/$/, "");
+  }
+};
+
 const ALLOWED_ORIGINS = Array.from(
-  new Set(
-    RAW_ORIGINS.map((origin) => String(origin || "").trim().replace(/\/$/, ""))
-      .filter(Boolean)
-  )
+  new Set(RAW_ORIGINS.map((origin) => sanitizeOrigin(origin)).filter(Boolean))
 );
+
+const primaryFrontend = sanitizeOrigin(process.env.FRONTEND_URL);
+let allowAnyVercelOrigin = false;
+try {
+  allowAnyVercelOrigin = new URL(primaryFrontend).hostname.endsWith(".vercel.app");
+} catch (error) {
+  void error;
+}
 
 const isOriginAllowed = (origin) => {
   if (!origin) return true;
 
-  const cleanOrigin = String(origin).trim().replace(/\/$/, "");
+  const cleanOrigin = sanitizeOrigin(origin);
   if (ALLOWED_ORIGINS.includes(cleanOrigin)) return true;
 
-  if (process.env.ALLOW_VERCEL_PREVIEW === "true") {
+  if (process.env.ALLOW_VERCEL_PREVIEW === "true" || allowAnyVercelOrigin) {
     try {
       const hostname = new URL(cleanOrigin).hostname;
       if (hostname.endsWith(".vercel.app")) return true;
