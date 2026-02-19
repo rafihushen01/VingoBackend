@@ -1,8 +1,3 @@
-/* =========================================================
-   🚀 VINGO GOD-MODE ULTRA ENTERPRISE SERVER
-   RAILWAY + REALTIME + HTTPS + AUTO-RECOVERY
-   ========================================================= */
-
 const express = require("express");
 const http = require("http");
 const cors = require("cors");
@@ -13,22 +8,20 @@ const { Server } = require("socket.io");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const dotenv = require("dotenv");
+
 dotenv.config();
 
-/* ===================== ENV VALIDATION ===================== */
 const REQUIRED_ENVS = ["MONGO_URL", "PORT", "FRONTEND_URL"];
 REQUIRED_ENVS.forEach((key) => {
   if (!process.env[key]) {
-    console.error(`❌ FATAL: ${key} missing in Railway ENV`);
+    console.error(`FATAL: ${key} missing in environment`);
     process.exit(1);
   }
 });
 
-/* ===================== EXPRESS APP ===================== */
 const app = express();
 app.set("trust proxy", 1);
 
-/* ===================== GLOBAL MIDDLEWARE ===================== */
 app.use(helmet());
 app.use(compression());
 app.use(express.json({ limit: "25mb" }));
@@ -36,25 +29,65 @@ app.use(express.urlencoded({ extended: true, limit: "25mb" }));
 app.use(cookieParser());
 app.use(morgan("tiny"));
 
-/* ===================== CORS (RAILWAY SAFE) ===================== */
-const ALLOWED_ORIGINS = [
+const RAW_ORIGINS = [
   process.env.FRONTEND_URL,
   process.env.SECOND_FRONTEND_URL,
   process.env.THIRD_FRONTEND_URL,
+  ...(process.env.ADDITIONAL_FRONTEND_URLS || "").split(","),
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://127.0.0.1:5173",
+  "http://127.0.0.1:5174",
 ];
 
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error("CORS BLOCKED"));
-    },
-    credentials: true,
-    methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
-  })
+const ALLOWED_ORIGINS = Array.from(
+  new Set(
+    RAW_ORIGINS.map((origin) => String(origin || "").trim().replace(/\/$/, ""))
+      .filter(Boolean)
+  )
 );
 
-/* ===================== NO CACHE ===================== */
+const isOriginAllowed = (origin) => {
+  if (!origin) return true;
+
+  const cleanOrigin = String(origin).trim().replace(/\/$/, "");
+  if (ALLOWED_ORIGINS.includes(cleanOrigin)) return true;
+
+  if (process.env.ALLOW_VERCEL_PREVIEW === "true") {
+    try {
+      const hostname = new URL(cleanOrigin).hostname;
+      if (hostname.endsWith(".vercel.app")) return true;
+    } catch (error) {
+      void error;
+    }
+  }
+
+  return false;
+};
+
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (isOriginAllowed(origin)) {
+      return cb(null, true);
+    }
+
+    console.log("CORS rejected origin:", origin);
+    return cb(null, false);
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Access-Token",
+    "X-Auth-Token",
+  ],
+  optionsSuccessStatus: 200,
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+
 app.use((req, res, next) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("Pragma", "no-cache");
@@ -62,23 +95,23 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ===================== REQUEST TIMEOUT GUARD ===================== */
 app.use((req, res, next) => {
   const timer = setTimeout(() => {
     if (!res.headersSent) {
       res.status(408).json({ message: "Request Timeout" });
     }
   }, 20000);
+
   res.on("finish", () => clearTimeout(timer));
   next();
 });
 
-/* ===================== MONGODB ENTERPRISE CONNECTION ===================== */
 let cached = global.mongoose;
 if (!cached) cached = global.mongoose = { conn: null, promise: null };
 
 async function connectDB() {
   if (cached.conn) return cached.conn;
+
   if (!cached.promise) {
     cached.promise = mongoose
       .connect(process.env.MONGO_URL, {
@@ -89,38 +122,45 @@ async function connectDB() {
         family: 4,
         autoIndex: false,
       })
-      .then((mongoose) => {
-        console.log("✅ MongoDB Connected (Enterprise Mode)");
-        return mongoose;
+      .then((db) => {
+        console.log("MongoDB connected");
+        return db;
       })
       .catch((err) => {
-        console.error("❌ MongoDB Crash:", err.message);
+        console.error("MongoDB connection failed:", err.message);
         process.exit(1);
       });
   }
+
   cached.conn = await cached.promise;
   return cached.conn;
 }
 
-/* ===================== DB AUTO-RECOVERY ===================== */
-mongoose.connection.on("disconnected", () => console.warn("⚠️ MongoDB Disconnected — Reconnecting..."));
-mongoose.connection.on("reconnected", () => console.log("♻️ MongoDB Reconnected"));
-mongoose.connection.on("error", (err) => console.error("🔥 MongoDB Error:", err.message));
+mongoose.connection.on("disconnected", () => {
+  console.warn("MongoDB disconnected, reconnecting...");
+});
 
-/* ===================== HEALTH CHECK (FAST RESPONSE) ===================== */
-app.get("/ping", (req, res) => res.send("🏓 Pong")); // Railway ping-friendly
-app.get("/", (req, res) => res.send("🚀 VINGO Backend LIVE"));
-app.get("/health", (req, res) =>
+mongoose.connection.on("reconnected", () => {
+  console.log("MongoDB reconnected");
+});
+
+mongoose.connection.on("error", (err) => {
+  console.error("MongoDB error:", err.message);
+});
+
+app.get("/ping", (req, res) => res.send("Pong"));
+app.get("/", (req, res) => res.send("VINGO Backend LIVE"));
+app.get("/health", (req, res) => {
   res.json({
     status: "OK",
     db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
     uptime: process.uptime(),
     memory: process.memoryUsage(),
     time: new Date(),
-  })
-);
+    allowedOrigins: ALLOWED_ORIGINS,
+  });
+});
 
-/* ===================== ROUTES ===================== */
 const userrouter = require("../src/route/AuthRoute.js");
 const shoprouter = require("../src/route/ShopRoute.js");
 const itemrouter = require("../src/route/ItemRoute.js");
@@ -131,10 +171,12 @@ app.use("/shop", shoprouter);
 app.use("/item", itemrouter);
 app.use("/order", orderrouter);
 
-/* ===================== SOCKET.IO ENTERPRISE ===================== */
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: ALLOWED_ORIGINS, credentials: true },
+  cors: {
+    origin: (origin, cb) => cb(null, isOriginAllowed(origin)),
+    credentials: true,
+  },
   transports: ["websocket", "polling"],
   pingTimeout: 35000,
   pingInterval: 25000,
@@ -143,32 +185,30 @@ const io = new Server(server, {
 });
 
 io.on("connection", (socket) => {
-  console.log("🟢 Socket Connected:", socket.id);
+  console.log("Socket connected:", socket.id);
   socket.on("join_room", (roomid) => socket.join(roomid));
   socket.on("leave_room", (roomid) => socket.leave(roomid));
   socket.on("new_order", (data) => io.to(data.shopid).emit("order_received", data));
-  socket.on("order_status_update", (data) => io.to(data.userid).emit("order_status_changed", data));
-  socket.on("disconnect", (reason) => console.log("🔴 Socket Disconnected:", reason));
+  socket.on("order_status_update", (data) =>
+    io.to(data.userid).emit("order_status_changed", data)
+  );
+  socket.on("disconnect", (reason) => console.log("Socket disconnected:", reason));
 });
 
-/* ===================== GLOBAL ERROR SHIELD ===================== */
 app.use((err, req, res, next) => {
-  console.error("🔥 Server Error:", err.stack || err);
+  void next;
+  console.error("Server error:", err.stack || err);
   if (!res.headersSent) res.status(500).json({ message: "Internal Server Error" });
 });
 
-/* ===================== KEEP-ALIVE ===================== */
 server.keepAliveTimeout = 70000;
 server.headersTimeout = 71000;
 
-/* ===================== START SERVER (RAILWAY READY) ===================== */
 const PORT = process.env.PORT || 8080;
 
-// 🔥 START SERVER IMMEDIATELY (prevents 502 on Railway)
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 VINGO Is LISTENING ON PORT ${PORT}`);
+  console.log(`VINGO listening on port ${PORT}`);
+  console.log("Allowed CORS origins:", ALLOWED_ORIGINS);
 });
 
-// 🔥 CONNECT DB ASYNC (does not block server start)
-connectDB().catch(err => console.error("MongoDB async connection failed", err));
-
+connectDB().catch((err) => console.error("MongoDB async connection failed", err));
