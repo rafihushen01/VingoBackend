@@ -1,5 +1,15 @@
 const user = require("../models/User");
 
+const normalizeUser = (doc) => {
+  const plain = doc?.toObject ? doc.toObject() : doc;
+  if (!plain) return null;
+
+  return {
+    ...plain,
+    id: String(plain.id || plain._id || ""),
+  };
+};
+
 const getcurrentuser = async (req, res) => {
   try {
     const userId = req.userId;
@@ -9,6 +19,7 @@ const getcurrentuser = async (req, res) => {
         success: false,
         message: "No active session",
         User: null,
+        user: null,
       });
     }
 
@@ -19,10 +30,16 @@ const getcurrentuser = async (req, res) => {
         success: false,
         message: "User does not exist",
         User: null,
+        user: null,
       });
     }
 
-    return res.status(200).json({ success: true, User });
+    const normalizedUser = normalizeUser(User);
+    return res.status(200).json({
+      success: true,
+      User: normalizedUser,
+      user: normalizedUser,
+    });
   } catch (error) {
     return res.status(500).json({ message: `getcurrent error: ${error.message}` });
   }
