@@ -1,7 +1,9 @@
 const Order = require("../models/Order.js");
 const Shop = require("../models/Shop.js");
+const Item = require("../models/Items.js");
 const User = require("../models/User.js");
 const Delivery = require("../models/Deliveryassignment.js");
+const mongoose = require("mongoose");
 const{sendeliveryotp}=require("../utils/Mail.js")
 const placeorder = async (req, res) => {
   try {
@@ -13,26 +15,70 @@ const placeorder = async (req, res) => {
       delmobile,
     } = req.body;
 
-    if (!cartitems || cartitems.length === 0) {
-      return res.status(400).json({ message: "Cart is empty" });
+    if (!Array.isArray(cartitems) || cartitems.length === 0) {
+      return res.status(400).json({ success: false, message: "Cart is empty" });
     }
 
     if (
       !deliveryaddress?.text ||
-      !deliveryaddress?.latitude ||
-      !deliveryaddress?.longitude
+      deliveryaddress?.latitude === undefined ||
+      deliveryaddress?.longitude === undefined
     ) {
       return res
         .status(400)
-        .json({ message: "Send complete delivery address" });
+        .json({ success: false, message: "Send complete delivery address" });
     }
 
     // 🛍️ Group items by shop
+    const normalizedCartItems = await Promise.all(
+      cartitems.map(async (item = {}) => {
+        const itemId = item.id || item._id || item.item;
+        let shopId = item.shop || item.shopId || null;
+
+        if (shopId && typeof shopId === "object") {
+          shopId = shopId._id || shopId.id || null;
+        }
+
+        if (
+          (!shopId || shopId === "undefined") &&
+          itemId &&
+          mongoose.Types.ObjectId.isValid(itemId)
+        ) {
+          const itemDoc = await Item.findById(itemId).select("shop");
+          if (itemDoc?.shop) {
+            shopId = itemDoc.shop.toString();
+          }
+        }
+
+        return {
+          id: itemId ? String(itemId) : null,
+          shop: shopId ? String(shopId) : null,
+          name: item.name || "Item",
+          price: Number(item.price) || 0,
+          quantity: Number(item.quantity) > 0 ? Number(item.quantity) : 1,
+        };
+      })
+    );
+
+    const invalidItem = normalizedCartItems.find(
+      (item) =>
+        !item.id ||
+        !item.shop ||
+        !mongoose.Types.ObjectId.isValid(item.id) ||
+        !mongoose.Types.ObjectId.isValid(item.shop)
+    );
+
+    if (invalidItem) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid cart item data. Please refresh cart and try again.",
+      });
+    }
+
     const groupsitembyshop = {};
-    cartitems.forEach((item) => {
-      const shopId = item.shop;
-      if (!groupsitembyshop[shopId]) groupsitembyshop[shopId] = [];
-      groupsitembyshop[shopId].push(item);
+    normalizedCartItems.forEach((item) => {
+      if (!groupsitembyshop[item.shop]) groupsitembyshop[item.shop] = [];
+      groupsitembyshop[item.shop].push(item);
     });
 
     // 🏪 Create shop-based order summary
@@ -40,6 +86,7 @@ const placeorder = async (req, res) => {
       Object.keys(groupsitembyshop).map(async (shopId) => {
         const shopDoc = await Shop.findById(shopId).populate("owner");
         if (!shopDoc) throw new Error(`Shop not found for ID: ${shopId}`);
+        if (!shopDoc.owner) throw new Error(`Shop owner missing for ID: ${shopId}`);
 
         const itemGroup = groupsitembyshop[shopId];
         const subtotal = itemGroup.reduce(
